@@ -1,0 +1,13 @@
+[package]
+name = "workflow"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lazy_static = "1.5.0"
+tokio = { version = "1.0", features = ["full"] }
+pg_db_con ={version = "0.1.0", path = "../pg_db_con"}
+chain_service ={version = "0.1.0", path = "../chain_service"}
+serde_json = "1.0.117"
+log = "0.4.22"
+

@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package query;
+
+service QueryService {
+  rpc StartQuery(QueryRequest) returns (QueryResponse);
+  rpc EndQuery(QueryEndRequest) returns (QueryResponse);
+}
+
+message QueryRequest {
+  string activity_name = 1;
+  string start_bn = 2;
+  string end_block = 3;
+  string chain_id = 4;
+}
+
+message QueryEndRequest {
+  string activity_name = 1;
+  string end_block = 2;
+}
+
+message QueryResponse {
+  string message = 1;
+}
