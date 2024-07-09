@@ -10,4 +10,6 @@ pg_db_con ={version = "0.1.0", path = "../pg_db_con"}
 chain_service ={version = "0.1.0", path = "../chain_service"}
 serde_json = "1.0.117"
 log = "0.4.22"
+num-bigint = "0.4.6"
+num-traits = "0.2.19"
 

@@ -21,6 +21,20 @@ pub struct QueryEndRequest {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TxQueryRequest {
+    #[prost(string, tag = "1")]
+    pub activity_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub start_bn: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub end_block: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub chain_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub address: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct QueryResponse {
     #[prost(string, tag = "1")]
     pub message: ::prost::alloc::string::String,
@@ -154,6 +168,28 @@ pub mod query_service_client {
                 .insert(GrpcMethod::new("query.QueryService", "EndQuery"));
             self.inner.unary(req, path, codec).await
         }
+        pub async fn start_tx_query(
+            &mut self,
+            request: impl tonic::IntoRequest<super::TxQueryRequest>,
+        ) -> std::result::Result<tonic::Response<super::QueryResponse>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/query.QueryService/StartTxQuery",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("query.QueryService", "StartTxQuery"));
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -170,6 +206,10 @@ pub mod query_service_server {
         async fn end_query(
             &self,
             request: tonic::Request<super::QueryEndRequest>,
+        ) -> std::result::Result<tonic::Response<super::QueryResponse>, tonic::Status>;
+        async fn start_tx_query(
+            &self,
+            request: tonic::Request<super::TxQueryRequest>,
         ) -> std::result::Result<tonic::Response<super::QueryResponse>, tonic::Status>;
     }
     #[derive(Debug)]
@@ -328,6 +368,52 @@ pub mod query_service_server {
                     let fut = async move {
                         let inner = inner.0;
                         let method = EndQuerySvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/query.QueryService/StartTxQuery" => {
+                    #[allow(non_camel_case_types)]
+                    struct StartTxQuerySvc<T: QueryService>(pub Arc<T>);
+                    impl<
+                        T: QueryService,
+                    > tonic::server::UnaryService<super::TxQueryRequest>
+                    for StartTxQuerySvc<T> {
+                        type Response = super::QueryResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::TxQueryRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as QueryService>::start_tx_query(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = StartTxQuerySvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

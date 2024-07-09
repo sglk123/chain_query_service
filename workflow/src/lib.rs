@@ -8,6 +8,8 @@ use chain_service::get_chain_service_config;
 use pg_db_con::pg::{Block, get_pg_config, init, PgConfig};
 use serde_json::{json, Value, Error};
 use log::{error, info, log};
+use num_bigint::BigInt;
+use num_traits::{ToPrimitive, FromPrimitive};
 
 lazy_static! {
     static ref WORKFLOW: Mutex<Workflow> = Mutex::new(Workflow {
@@ -32,6 +34,21 @@ impl Manager {
         let request = r.clone();
         let task_handle = tokio::spawn(async move {
             range_query(request, stop_receiver).await;
+        });
+
+        Manager {
+            manager_id: r.activity_name,
+            task_handle: Some(task_handle),
+            stop_sender: Some(stop_sender),
+        }
+    }
+
+    pub fn new_tx(r: TxQueryRequest) -> Self {
+        info!("create activity manager for {}",  &r.activity_name);
+        let (stop_sender, stop_receiver) = oneshot::channel();
+        let request = r.clone();
+        let task_handle = tokio::spawn(async move {
+            range_tx_query(request, stop_receiver).await;
         });
 
         Manager {
@@ -66,15 +83,38 @@ pub struct QueryRequest {
 }
 
 #[derive(Clone, Debug)]
+pub struct TxQueryRequest {
+    pub activity_name: String,
+    pub start_bn: String,
+    pub end_block: String,
+    pub chain_id: String,
+    pub address: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct QueryEndRequest {
     pub activity_name: String,
     pub end_block: String,
+}
+
+pub async fn should_start(table_name: &str) -> bool {
+    let pg_config = get_pg_config().unwrap().clone();
+    let db_pg = init(pg_config).await;
+    !db_pg.table_exists(table_name).await.unwrap()
 }
 
 pub async fn add_query_task(query_start: QueryRequest) {
     println!("receive add_task from{}", &query_start.activity_name);
     info!("receive add_task from {}",  &query_start.activity_name);
     let manager = Manager::new(query_start.clone());
+    let mut wf = WORKFLOW.lock().unwrap();
+    wf.tasks.insert(query_start.activity_name, manager);
+}
+
+pub async fn add_tx_query_task(query_start: TxQueryRequest) {
+    println!("receive tx_add_task from{}", &query_start.activity_name);
+    info!("receive tx_add_task from {}",  &query_start.activity_name);
+    let manager = Manager::new_tx(query_start.clone());
     let mut wf = WORKFLOW.lock().unwrap();
     wf.tasks.insert(query_start.activity_name, manager);
 }
@@ -98,30 +138,31 @@ pub async fn end_task(query_end: QueryEndRequest) {
 
 
 async fn range_query(r: QueryRequest, mut stop_receiver: oneshot::Receiver<()>) {
-    let start_bn = match r.start_bn.parse::<i64>() {
-        Ok(num) => {
-            if num < 0 {
+    let start_bn = match BigInt::parse_bytes(r.start_bn.as_bytes(), 10) {
+        Some(num) => {
+            if num < BigInt::from(0) {
                 eprintln!("Start block number cannot be negative.");
                 error!("Start block number cannot be negative for {:?}", &r.activity_name);
                 return;
             }
             num
         }
-        Err(_) => {
+        None => {
             eprintln!("Invalid start block number.");
             error!("Invalid start block number {:?}", &r.activity_name);
             return;
         }
     };
 
-    let end_block = match r.end_block.parse::<i64>() {
-        Ok(num) => num,
-        Err(_) => {
+    let end_block = match BigInt::parse_bytes(r.end_block.as_bytes(), 10) {
+        Some(num) => num,
+        None => {
             eprintln!("Invalid end block number.");
             error!("Invalid end block number {:?}", &r.activity_name);
             return;
         }
     };
+
 
     if end_block < start_bn {
         println!("timely query here");
@@ -131,7 +172,7 @@ async fn range_query(r: QueryRequest, mut stop_receiver: oneshot::Receiver<()>) 
         db_pg.create_activity_table(r.activity_name.to_string()).await;
         let chain_config = get_chain_service_config().unwrap().clone();
         let chain_service_instance = chain_service::create_service(&chain_config.provider, &chain_config.endpoint).unwrap();
-        let mut cur_timestamp = start_bn;
+        let mut cur_timestamp = start_bn.clone();
         // If end_block is less than start_bn, perform a timed query until stopped
         loop {
             tokio::select! {
@@ -159,7 +200,8 @@ async fn range_query(r: QueryRequest, mut stop_receiver: oneshot::Receiver<()>) 
                 _ = tokio::time::sleep(tokio::time::Duration::from_secs(30)) => {
                     println!("Performing periodic query from block {} to {} cur {},for task {:?}.", start_bn, end_block,cur_timestamp, &r.activity_name);
                     info!("Performing periodic query from block {} to {} cur {},for task {:?}.", start_bn, end_block,cur_timestamp, &r.activity_name);
-                     let block_meta = chain_service_instance.get_block_by_number(&cur_timestamp.to_string()).await.unwrap();
+                     let hex_str = format!("0x{}", cur_timestamp.to_str_radix(16));
+                     let block_meta = chain_service_instance.get_block_by_number(&hex_str).await.unwrap();
                         db_pg.block_insert(Block {
                             block_num: cur_timestamp.to_string(),
                             event_meta: serde_json::to_vec(&block_meta).unwrap(),
@@ -188,16 +230,152 @@ async fn range_query(r: QueryRequest, mut stop_receiver: oneshot::Receiver<()>) 
         let chain_service_instance = chain_service::create_service(&chain_config.provider, &chain_config.endpoint).unwrap();
         // loop query
         println!("Starting loop query from block {} to {}.", start_bn, end_block);
-        for block_number in start_bn..=end_block {
-            println!("Starting query from block {}", block_number);
-            info!("Starting query from block {} to {} cur {} for task {}.", start_bn, end_block,block_number, &r.activity_name);
-            let block_meta = chain_service_instance.get_block_by_number(&block_number.to_string()).await.unwrap();
+        let mut block_number = start_bn.clone();
+        while block_number <= end_block {
+            println!("Starting query from block {}", block_number.to_string());
+            info!("Starting query from block {} for task {}.", block_number.to_string(), &r.activity_name);
+            let hex_str = format!("0x{}", block_number.to_str_radix(16));
+            let block_meta = chain_service_instance.get_block_by_number(&hex_str).await.unwrap();
             db_pg.block_insert(Block {
                 block_num: block_number.to_string(),
                 event_meta: serde_json::to_vec(&block_meta).unwrap(),
-            }, &r.activity_name).await.unwrap()
+            }, &r.activity_name).await.unwrap();
+
+            block_number += BigInt::from(1);
         }
 
+        match stop_receiver.await {
+            Ok(_) => {
+                println!("Received stop signal, stopping the query.");
+                info!("Received stop signal for task {}, shutting down...", &r.activity_name);
+                match db_pg.drop_table(&r.activity_name).await {
+                    Ok(_) => {
+                        info!("drop successfully for {}", &r.activity_name);
+                        println!("drop successfully for {}", r.activity_name);
+                    }
+                    Err(_) => {
+                        error!("failed to drop {}", r.activity_name);
+                        println!("failed to drop {}", r.activity_name);
+                    }
+                }
+            }
+            Err(_) => {
+                error!("Stop signal channel was closed unexpectedly.Manual drop table {}", r.activity_name);
+                println!("Stop signal channel was closed unexpectedly.Manual drop table {}", r.activity_name);
+            }
+        }
+        println!("Query completed or stopped.");
+    }
+}
+
+
+async fn range_tx_query(r: TxQueryRequest, mut stop_receiver: oneshot::Receiver<()>) {
+    let start_bn = match BigInt::parse_bytes(r.start_bn.as_bytes(), 10) {
+        Some(num) => {
+            if num < BigInt::from(0) {
+                eprintln!("Start block number cannot be negative.");
+                error!("Start block number cannot be negative for {:?}", &r.activity_name);
+                return;
+            }
+            num
+        }
+        None => {
+            eprintln!("Invalid start block number.");
+            error!("Invalid start block number {:?}", &r.activity_name);
+            return;
+        }
+    };
+
+    let end_block = match BigInt::parse_bytes(r.end_block.as_bytes(), 10) {
+        Some(num) => num,
+        None => {
+            eprintln!("Invalid end block number.");
+            error!("Invalid end block number {:?}", &r.activity_name);
+            return;
+        }
+    };
+
+
+    if end_block < start_bn {
+        println!("timely query here");
+        info!("end_block which is {:?} is smaller than start_block which is {:?},Scheduled query for {:?}",&r.end_block, &r.start_bn, &r.activity_name);
+        let pg_config = get_pg_config().unwrap().clone();
+        let db_pg = init(pg_config).await;
+        db_pg.create_tx_table(r.activity_name.to_string()).await;
+        let chain_config = get_chain_service_config().unwrap().clone();
+        let chain_service_instance = chain_service::create_service(&chain_config.provider, &chain_config.endpoint).unwrap();
+        let mut cur_timestamp = start_bn.clone();
+        // If end_block is less than start_bn, perform a timed query until stopped
+        loop {
+            tokio::select! {
+                stop_signal = &mut stop_receiver => {
+                if stop_signal.is_ok() {
+                        info!("Received stop signal for task {}, shutting down...", &r.activity_name);
+                        println!("Received stop signal for task {}, shutting down...", &r.activity_name);
+                   match db_pg.drop_table(&r.activity_name).await {
+                    Ok(_) => {
+                                info!("drop successfully for {}", &r.activity_name);
+                                println!("drop successfully for {}", &r.activity_name);
+                    }
+                    Err(_) => {
+                                error!("failed to drop {}", &r.activity_name);
+                                println!("failed to drop {}", &r.activity_name);
+                    }
+                }
+                    break;
+                } else {
+                        info!("Stop signal channel was closed unexpectedly.need manual drop table for task {}", &r.activity_name);
+                        println!("Stop signal channel was closed unexpectedly.need manual drop table for task {}", &r.activity_name);
+                        break;
+                }
+            }
+                _ = tokio::time::sleep(tokio::time::Duration::from_secs(30)) => {
+                    println!("Performing periodic query from block {} to {} cur {},for task {:?}.", start_bn, end_block,cur_timestamp, &r.activity_name);
+                    info!("Performing periodic query from block {} to {} cur {},for task {:?}.", start_bn, end_block,cur_timestamp, &r.activity_name);
+                     let hex_str = format!("0x{}", cur_timestamp.to_str_radix(16));
+                     let block_meta = chain_service_instance.get_tx_list_from_block(&hex_str, &r.address).await.unwrap();
+                     for tx in block_meta {
+                          let tx_data = serde_json::to_vec(&tx).unwrap();
+                             db_pg.insert_tx(tx_data, &r.activity_name).await.unwrap();
+                     }
+                     cur_timestamp += 1;
+
+                }
+            }
+        }
+    } else {
+        println!("Starting query from block {} to {}.", start_bn, end_block);
+        info!("Starting query from block {} to {} for task {}.", start_bn, end_block, &r.activity_name);
+        // create table
+        let pg_config = get_pg_config().unwrap().clone();
+        println!("{:?}", pg_config);
+        // let test_conf = PgConfig {
+        //     host: "localhost".to_string(),
+        //     port: 5432,
+        //     user: "postgres".to_string(),
+        //     password: "123".to_string(),
+        //     dbname: "mydb".to_string(),
+        // };
+        let db_pg = init(pg_config).await;
+        db_pg.create_tx_table(r.activity_name.to_string()).await;
+        let chain_config = get_chain_service_config().unwrap().clone();
+        let chain_service_instance = chain_service::create_service(&chain_config.provider, &chain_config.endpoint).unwrap();
+        // loop query
+        println!("Starting loop query from block {} to {}.", start_bn, end_block);
+        let mut block_number = start_bn.clone();
+        while block_number <= end_block {
+            println!("Starting query from block {}", block_number.to_string());
+            info!("Starting query from block {} for task {}.", block_number.to_string(), &r.activity_name);
+            let hex_str = format!("0x{}", block_number.to_str_radix(16));
+            let block_meta = chain_service_instance.get_tx_list_from_block(&hex_str, &r.address).await.unwrap();
+            for tx in block_meta {
+                let tx_data = serde_json::to_vec(&tx).unwrap();
+                db_pg.insert_tx(tx_data, &r.activity_name).await.unwrap();
+            }
+            block_number += BigInt::from(1);
+        }
+        /// end signal
+        db_pg.insert_tx(vec![1], &r.activity_name).await.unwrap();
 
         match stop_receiver.await {
             Ok(_) => {

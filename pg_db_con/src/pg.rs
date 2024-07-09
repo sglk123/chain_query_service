@@ -109,13 +109,14 @@ pub async fn init(conf: PgConfig) -> DbPg {
 }
 
 impl DbPg {
+    /// for block indexing in terms of block number
     pub async fn create_activity_table(&self, activity: String) {
         let mut conn = self.pool.get().await;
         match &conn {
             Ok(_) => {}
-            Err(e) => { println!("{}", e);}
+            Err(e) => { println!("{}", e); }
         }
-        println!("create table {}",activity);
+        println!("create table {}", activity);
         let _ = conn.unwrap()
             .execute(&format!(
                 "CREATE TABLE {}(
@@ -128,12 +129,47 @@ impl DbPg {
             .await;
     }
 
+    /// for transaction indexing
+    pub async fn create_tx_table(&self, table_name: String) {
+        let mut conn = self.pool.get().await;
+        match &conn {
+            Ok(_) => {}
+            Err(e) => { println!("{}", e); }
+        }
+        println!("create table {}", table_name);
+        let _ = conn.unwrap()
+            .execute(&format!(
+                "CREATE TABLE {}(
+                id SERIAL PRIMARY KEY,
+                tx_meta BYTEA
+            )", table_name),
+                     &[],
+            )
+            .await;
+    }
+
+    pub async fn table_exists(&self, table_name: &str) -> Result<bool, tokio_postgres::Error> {
+        let conn = self.pool.get().await.unwrap();
+        let query = format!("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = '{}')", table_name);
+        let rows = conn.query(&query, &[]).await?;
+        Ok(rows[0].get(0))
+    }
+
     pub async fn block_insert(&self, block: Block, table_name: &str) -> Result<(), tokio_postgres::Error> {
         let conn = self.pool.get().await.unwrap();
         let insert = format!("INSERT INTO {} (block_number, block_meta) VALUES ($1, $2)", table_name);
         conn.execute(&insert, &[&block.block_num, &block.event_meta]).await?;
         Ok(())
     }
+
+    /// tx should be use serde_json::Value
+    pub async fn insert_tx(&self, tx: Vec<u8>, table_name: &str) -> Result<(), tokio_postgres::Error> {
+        let conn = self.pool.get().await.unwrap();
+        let insert = format!("INSERT INTO {} (tx_meta) VALUES ($1)", table_name);
+        conn.execute(&insert, &[&tx]).await?;
+        Ok(())
+    }
+
 
     pub async fn drop_table(&self, table_name: &str) -> Result<(), tokio_postgres::Error> {
         let conn = self.pool.get().await.unwrap();
@@ -168,11 +204,11 @@ mod tests {
     async fn test_create_table() {
         // Define a test configuration
         let test_conf = PgConfig {
-            host: "localhost".to_string(),
+            host: "52.221.181.98".to_string(),
             port: 5432,
             user: "postgres".to_string(),
-            password: "123".to_string(),
-            dbname: "mydb".to_string(),
+            password: "postgres".to_string(),
+            dbname: "sglk".to_string(),
         };
         let db_pg = init(test_conf).await;
         db_pg.create_activity_table("activity1".to_string()).await;
@@ -192,5 +228,50 @@ mod tests {
         let result = db_pg.drop_table("activity1").await;
 
         assert!(result.is_ok(), "Failed to drop table: {:?}", result.err());
+    }
+
+
+    #[tokio::test]
+    async fn test_create_tx_table() {
+        let test_conf = PgConfig {
+            host: "localhost".to_string(),
+            port: 5432,
+            user: "postgres".to_string(),
+            password: "123".to_string(),
+            dbname: "mydb".to_string(),
+        };
+        let db_pg = init(test_conf).await;
+        db_pg.create_tx_table("tx_table".to_string()).await;
+    }
+
+    #[tokio::test]
+    async fn test_insert_tx() {
+        let test_conf = PgConfig {
+            host: "localhost".to_string(),
+            port: 5432,
+            user: "postgres".to_string(),
+            password: "123".to_string(),
+            dbname: "mydb".to_string(),
+        };
+        let db_pg = init(test_conf).await;
+        let tx_meta = vec![1, 2, 3];
+        db_pg.insert_tx(tx_meta, "tx_table").await.expect("fail to insert tx");
+    }
+
+
+    #[tokio::test]
+    async fn test_table_exists() {
+        let test_conf = PgConfig {
+            host: "localhost".to_string(),
+            port: 5432,
+            user: "postgres".to_string(),
+            password: "123".to_string(),
+            dbname: "mydb".to_string(),
+        };
+        let db_pg = init(test_conf).await;
+
+        let exists = db_pg.table_exists("users").await.expect("Failed to check if table exists");
+        println!("is exists {:?}", exists);
+        assert!(exists, "Table should exist");
     }
 }
