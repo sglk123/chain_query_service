@@ -75,13 +75,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_tx_client() -> Result<(), Box<dyn std::error::Error>> {
-        let channel = Channel::from_static("http://18.140.5.197:50051")
-            .connect()
-            .await?;
-
-        // let channel = Channel::from_static("http://localhost:50051")
+        // let channel = Channel::from_static("http://18.140.5.197:50051")
         //     .connect()
         //     .await?;
+
+        let channel = Channel::from_static("http://localhost:50051")
+            .connect()
+            .await?;
 
         let mut client = QueryServiceClient::new(channel);
         //
@@ -95,9 +95,9 @@ mod tests {
         // });
 
         let request = tonic::Request::new(TxQueryRequest {
-            activity_name: "Activitysss".to_string(),
+            activity_name: "Activitysss1".to_string(),
             start_bn: "20305518".to_string(),
-            end_block: "20305518".to_string(),
+            end_block: "20306518".to_string(),
             chain_id: "ETH".to_string(),
             address: "0xdAC17F958D2ee523a2206206994597C13D831ec7".to_string(),
         });

@@ -1,6 +1,7 @@
 chain_service:
   provider: quicknode
   endpoint: https://docs-demo.quiknode.pro/
+  maxcredit: 350
 rpc:
   address: 127.0.0.1:50051
 db:

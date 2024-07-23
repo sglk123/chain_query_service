@@ -302,8 +302,9 @@ async fn range_tx_query(r: TxQueryRequest, mut stop_receiver: oneshot::Receiver<
         let pg_config = get_pg_config().unwrap().clone();
         let db_pg = init(pg_config).await;
         db_pg.create_tx_table(r.activity_name.to_string()).await;
-        let chain_config = get_chain_service_config().unwrap().clone();
-        let chain_service_instance = chain_service::create_service(&chain_config.provider, &chain_config.endpoint).unwrap();
+        // let chain_config = get_chain_service_config().unwrap().clone();
+        // let chain_service_instance = chain_service::create_service(&chain_config.provider, &chain_config.endpoint).unwrap();
+        let chain_service_instance= chain_service::get_service();
         let mut cur_timestamp = start_bn.clone();
         // If end_block is less than start_bn, perform a timed query until stopped
         loop {
@@ -358,8 +359,9 @@ async fn range_tx_query(r: TxQueryRequest, mut stop_receiver: oneshot::Receiver<
         // };
         let db_pg = init(pg_config).await;
         db_pg.create_tx_table(r.activity_name.to_string()).await;
-        let chain_config = get_chain_service_config().unwrap().clone();
-        let chain_service_instance = chain_service::create_service(&chain_config.provider, &chain_config.endpoint).unwrap();
+        // let chain_config = get_chain_service_config().unwrap().clone();
+        // let chain_service_instance = chain_service::create_service(&chain_config.provider, &chain_config.endpoint).unwrap();
+        let chain_service_instance = chain_service::get_service();
         // loop query
         println!("Starting loop query from block {} to {}.", start_bn, end_block);
         let mut block_number = start_bn.clone();

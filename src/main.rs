@@ -7,7 +7,7 @@ use ::log::info;
 use serde::{Deserialize, Serialize};
 use tokio;
 use structopt::StructOpt;
-use chain_service::{ChainServiceConfig, initialize_chain_service};
+use chain_service::{ChainServiceConfig, initialize_chain_service, initialize_service};
 use pg_db_con::pg::{initialize_pg_config, PgConfig};
 use rpc::{MyQueryService, ServerConfig};
 use crate::error::{ConfigError, ConfigResult};
@@ -40,9 +40,15 @@ async fn async_main() {
     initialize_chain_service(
         ChainServiceConfig {
             provider: config.chain_service.provider.to_string(),
-            endpoint: config.chain_service.endpoint,
+            endpoint: config.chain_service.endpoint.to_string(),
+            maxcredit: config.chain_service.maxcredit,
         }
     ).unwrap();
+    initialize_service(ChainServiceConfig {
+        provider: config.chain_service.provider.to_string(),
+        endpoint: config.chain_service.endpoint.to_string(),
+        maxcredit: config.chain_service.maxcredit,
+    }).unwrap();
     rpc::init(service, rpc_config).await.unwrap()
 }
 
@@ -74,6 +80,7 @@ pub struct NodeConfig {
 pub struct ChainServiceConf {
     pub provider: String,
     pub endpoint: String,
+    pub maxcredit: usize,
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug, Default)]
